@@ -1,11 +1,11 @@
 <template>
   <div ref="chartRef" class="w-full h-full">
-    <div id="bar-chart-container"></div>
+    <div ref="chartContainer" class="h-full w-full"></div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import type { MetricSeries } from '@/types';
 
 interface Props {
@@ -19,13 +19,19 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const chartRef = ref<HTMLDivElement>();
+const chartContainer = ref<HTMLDivElement>();
 
 onMounted(() => {
   renderChart();
+  window.addEventListener('resize', renderChart);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', renderChart);
 });
 
 watch(
-  () => props.data,
+  [() => props.data, () => props.metrics],
   () => {
     renderChart();
   },
@@ -33,42 +39,46 @@ watch(
 );
 
 function renderChart() {
-  if (!chartRef.value) return;
+  if (!chartRef.value || !chartContainer.value) return;
+
+  const width = chartRef.value.clientWidth || 800;
+  const height = chartRef.value.clientHeight || 400;
+  const dpr = window.devicePixelRatio || 1;
 
   const canvas = document.createElement('canvas');
-  canvas.width = chartRef.value.offsetWidth || 800;
-  canvas.height = chartRef.value.offsetHeight || 400;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const padding = 40;
-  const width = canvas.width - 2 * padding;
-  const height = canvas.height - 2 * padding;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
 
-  // Draw background
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
 
-  // Draw grid and axes
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
 
   for (let i = 0; i <= 5; i++) {
-    const y = padding + (i * height) / 5;
+    const y = padding + (i * chartHeight) / 5;
     ctx.beginPath();
     ctx.moveTo(padding, y);
-    ctx.lineTo(padding + width, y);
+    ctx.lineTo(padding + chartWidth, y);
     ctx.stroke();
   }
 
-  // Draw axes
   ctx.strokeStyle = '#1f2937';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(padding, padding);
-  ctx.lineTo(padding, padding + height);
-  ctx.lineTo(padding + width, padding + height);
+  ctx.lineTo(padding, padding + chartHeight);
+  ctx.lineTo(padding + chartWidth, padding + chartHeight);
   ctx.stroke();
 
   const maxValue = Math.max(
@@ -78,20 +88,19 @@ function renderChart() {
     )
   );
 
-  // Draw bars
   const points = props.data.length;
   const totalSeries = props.metrics.length || 1;
-  const groupSpacing = width / Math.max(1, points);
-  const barWidth = Math.max(8, (groupSpacing * 0.8) / totalSeries);
+  const groupWidth = points ? chartWidth / points : chartWidth;
+  const barWidth = Math.max(8, Math.min(32, (groupWidth * 0.75) / totalSeries));
+  const groupPadding = (groupWidth - barWidth * totalSeries) / 2;
 
   props.data.forEach((point, index) => {
-    const baseX = padding + index * groupSpacing + groupSpacing * 0.1;
-    let barX = baseX;
+    let barX = padding + index * groupWidth + groupPadding;
 
     props.metrics.forEach((metric) => {
       const value = point[metric.id] || 0;
-      const barHeight = (value / maxValue) * height;
-      const barY = padding + height - barHeight;
+      const barHeight = (value / maxValue) * chartHeight;
+      const barY = padding + chartHeight - barHeight;
 
       ctx.fillStyle = metric.color;
       ctx.fillRect(barX, barY, barWidth, barHeight);
@@ -99,10 +108,8 @@ function renderChart() {
     });
   });
 
-  const container = document.getElementById('bar-chart-container');
-  if (container) {
-    container.innerHTML = '';
-    container.appendChild(canvas);
-  }
+  const container = chartContainer.value;
+  container.innerHTML = '';
+  container.appendChild(canvas);
 }
 </script>

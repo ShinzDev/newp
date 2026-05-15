@@ -1,11 +1,11 @@
 <template>
   <div ref="chartRef" class="w-full h-full">
-    <div id="area-chart-container"></div>
+    <div ref="chartContainer" class="h-full w-full"></div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import type { MetricSeries } from '@/types';
 
 interface Props {
@@ -19,13 +19,19 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const chartRef = ref<HTMLDivElement>();
+const chartContainer = ref<HTMLDivElement>();
 
 onMounted(() => {
   renderChart();
+  window.addEventListener('resize', renderChart);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', renderChart);
 });
 
 watch(
-  () => props.data,
+  [() => props.data, () => props.metrics],
   () => {
     renderChart();
   },
@@ -33,47 +39,50 @@ watch(
 );
 
 function renderChart() {
-  if (!chartRef.value) return;
+  if (!chartRef.value || !chartContainer.value) return;
+
+  const width = chartRef.value.clientWidth || 800;
+  const height = chartRef.value.clientHeight || 400;
+  const dpr = window.devicePixelRatio || 1;
 
   const canvas = document.createElement('canvas');
-  canvas.width = chartRef.value.offsetWidth || 800;
-  canvas.height = chartRef.value.offsetHeight || 400;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
 
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   const padding = 40;
-  const width = canvas.width - 2 * padding;
-  const height = canvas.height - 2 * padding;
+  const chartWidth = width - padding * 2;
+  const chartHeight = height - padding * 2;
 
-  // Draw background
-  ctx.fillStyle = 'white';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
 
-  // Draw grid
   ctx.strokeStyle = '#e5e7eb';
   ctx.lineWidth = 1;
 
   for (let i = 0; i <= 5; i++) {
-    const y = padding + (i * height) / 5;
+    const y = padding + (i * chartHeight) / 5;
     ctx.beginPath();
     ctx.moveTo(padding, y);
-    ctx.lineTo(padding + width, y);
+    ctx.lineTo(padding + chartWidth, y);
     ctx.stroke();
   }
 
-  // Draw axes
   ctx.strokeStyle = '#1f2937';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(padding, padding);
-  ctx.lineTo(padding, padding + height);
-  ctx.lineTo(padding + width, padding + height);
+  ctx.lineTo(padding, padding + chartHeight);
+  ctx.lineTo(padding + chartWidth, padding + chartHeight);
   ctx.stroke();
 
-  // Draw filled areas for each metric
   const points = props.data.length;
-  const stepX = width / Math.max(1, points - 1);
+  const stepX = points > 1 ? chartWidth / (points - 1) : chartWidth;
 
   const maxValue = Math.max(
     1,
@@ -87,20 +96,19 @@ function renderChart() {
     ctx.fillStyle = toRgba(metric.color, alpha);
 
     ctx.beginPath();
-    ctx.moveTo(padding, padding + height);
+    ctx.moveTo(padding, padding + chartHeight);
 
     props.data.forEach((point, index) => {
       const value = point[metric.id] || 0;
       const x = padding + index * stepX;
-      const y = padding + height - (value / maxValue) * height;
+      const y = padding + chartHeight - (value / maxValue) * chartHeight;
       ctx.lineTo(x, y);
     });
 
-    ctx.lineTo(padding + width, padding + height);
+    ctx.lineTo(padding + chartWidth, padding + chartHeight);
     ctx.closePath();
     ctx.fill();
 
-    // Draw line on top
     ctx.strokeStyle = metric.color;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -108,7 +116,7 @@ function renderChart() {
     props.data.forEach((point, index) => {
       const value = point[metric.id] || 0;
       const x = padding + index * stepX;
-      const y = padding + height - (value / 100) * height;
+      const y = padding + chartHeight - (value / maxValue) * chartHeight;
 
       if (index === 0) {
         ctx.moveTo(x, y);
@@ -120,17 +128,18 @@ function renderChart() {
     ctx.stroke();
   });
 
-  const container = document.getElementById('area-chart-container');
-  if (container) {
-    container.innerHTML = '';
-    container.appendChild(canvas);
-  }
+  const container = chartContainer.value;
+  container.innerHTML = '';
+  container.appendChild(canvas);
 }
+
 function toRgba(hex: string, alpha: number) {
-  const normalized = hex.replace('#', '')
-  const bigint = parseInt(normalized.length === 3 ? normalized.split('').map((char) => char + char).join('') : normalized, 16)
-  const r = (bigint >> 16) & 255
-  const g = (bigint >> 8) & 255
-  const b = bigint & 255
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}</script>
+  const normalized = hex.replace('#', '');
+  const fullHex = normalized.length === 3 ? normalized.split('').map((char) => char + char).join('') : normalized;
+  const bigint = parseInt(fullHex, 16);
+  const r = (bigint >> 16) & 255;
+  const g = (bigint >> 8) & 255;
+  const b = bigint & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+</script>
